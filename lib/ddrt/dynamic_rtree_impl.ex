@@ -1,7 +1,10 @@
 defmodule DDRT.DynamicRtreeImpl do
+  @moduledoc false
+
   alias DDRT.DynamicRtreeImpl.{Node, Utils}
 
   require Logger
+  alias DDRT.Debug
   import IO.ANSI
 
   # Between 1 y 64800. Bigger value => ^ updates speed, ~v query speed.
@@ -16,6 +19,9 @@ defmodule DDRT.DynamicRtreeImpl do
 
       @doc false
       defdelegate tree_insert(tree, leaf), to: DynamicRtreeImpl
+
+      @doc false
+      defdelegate tree_upsert(tree, id), to: DynamicRtreeImpl
 
       @doc false
       defdelegate tree_query(tree, box), to: DynamicRtreeImpl
@@ -53,55 +59,36 @@ defmodule DDRT.DynamicRtreeImpl do
   end
 
   def tree_insert(rbundle, {id, _box} = leaf) do
-    if rbundle.tree |> rbundle[:type].get(id) do
-      if rbundle.verbose,
-        do:
-          Logger.debug(
-            cyan() <>
-              "[" <>
-              green() <>
-              "Insertion" <>
-              cyan() <>
-              "] failed:" <>
-              yellow() <>
-              " [#{id}] " <>
-              cyan() <>
-              "already exists at tree." <>
-              yellow() <> " [Tip]" <> cyan() <> " use " <> yellow() <> "update_leaf/3"
-          )
-
-      rbundle.tree
-    else
+    with false <- rbundle[:type].has_key?(rbundle.tree, id) do
       path = best_subtree(rbundle, leaf)
+
       t1 = :os.system_time(:microsecond)
 
-      r =
-        insertion(rbundle, path, leaf)
+      new_tree =
+        rbundle
+        |> insertion(path, leaf)
         |> recursive_update(tl(path), leaf, :insertion)
 
       t2 = :os.system_time(:microsecond)
 
-      if rbundle.verbose,
-        do:
-          Logger.debug(
-            cyan() <>
-              "[" <>
-              green() <>
-              "Insertion" <>
-              cyan() <>
-              "] success: " <>
-              yellow() <>
-              "[#{id}]" <> cyan() <> " was inserted at" <> yellow() <> " ['#{hd(path)}']"
-          )
+      if rbundle.verbose do
+        Debug.log(:insertion_success, %{id: id, path: path})
+        Debug.log(:insertion_speed, %{time: t2 - t1})
+      end
 
-      if rbundle.verbose,
-        do:
-          Logger.info(
-            cyan() <>
-              "[" <> green() <> "Insertion" <> cyan() <> "] took" <> yellow() <> " #{t2 - t1} µs"
-          )
+      {:ok, new_tree}
+    else
+      true ->
+        if rbundle.verbose, do: Debug.log(:insertion_key_exists, %{id: id})
 
-      r
+        {:error, :key_exists}
+    end
+  end
+
+  def tree_upsert(rbundle, {id, _box} = leaf) do
+    with {:error, :key_exists} <- tree_insert(rbundle, leaf) do
+      new_tree = tree_update_leaf(rbundle, id, leaf)
+      {:ok, new_tree}
     end
   end
 
@@ -189,7 +176,7 @@ defmodule DDRT.DynamicRtreeImpl do
     else
       if rbundle.verbose,
         do:
-          Logger.warn(
+          Logger.warning(
             cyan() <>
               "[" <>
               color(195) <>
@@ -564,10 +551,7 @@ defmodule DDRT.DynamicRtreeImpl do
                     cyan() <>
                     " increases the parent box which was so big " <>
                     yellow() <>
-                    "#{
-                      ((Utils.area(parent_box) |> Kernel.trunc()) / @max_area * 100)
-                      |> Kernel.trunc()
-                    } %. " <>
+                    "#{((Utils.area(parent_box) |> Kernel.trunc()) / @max_area * 100) |> Kernel.trunc()} %. " <>
                     cyan() <>
                     "So we proceed to delete " <>
                     yellow() <> "[#{id}]" <> cyan() <> " and reinsert at tree"
@@ -593,10 +577,7 @@ defmodule DDRT.DynamicRtreeImpl do
                     cyan() <>
                     " increases the parent box which isn't that big yet " <>
                     yellow() <>
-                    "#{
-                      ((Utils.area(parent_box) |> Kernel.trunc()) / @max_area * 100)
-                      |> Kernel.trunc()
-                    } %. " <>
+                    "#{((Utils.area(parent_box) |> Kernel.trunc()) / @max_area * 100) |> Kernel.trunc()} %. " <>
                     cyan() <>
                     "So we proceed to increase parent " <>
                     yellow() <> "(['#{parent}'])" <> cyan() <> " box"

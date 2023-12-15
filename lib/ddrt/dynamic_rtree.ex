@@ -8,6 +8,14 @@ defmodule DDRT.DynamicRtree do
           conf: tree_config()
         ]
 
+  @type tree_bundle :: [
+          tree: map(),
+          width: integer(),
+          verbose: boolean(),
+          type: map(),
+          seeding: integer()
+        ]
+
   @type tree_config :: [
           name: GenServer.name(),
           width: integer(),
@@ -27,7 +35,7 @@ defmodule DDRT.DynamicRtree do
   @callback delete(ids :: id() | [id()], name :: GenServer.name()) ::
               {:ok, map()} | {:badtree, map()}
   @callback insert(leaves :: leaf() | [leaf()], name :: GenServer.name()) ::
-              {:ok, map()} | {:badtree, map()}
+              {:ok, map()} | {:badtree, map()} | {:key_exists, map()}
   @callback metadata(name :: GenServer.name()) :: map()
   @callback pquery(box :: bounding_box(), depth :: integer(), name :: GenServer.name()) ::
               {:ok, [id()]} | {:badtree, map()}
@@ -170,9 +178,9 @@ defmodule DDRT.DynamicRtree do
     - `name`: the r-tree name where you want to insert.
 
   ## Examples
-    
+
     Individual insertion:
-    
+
     ```
     iex> DynamicRtree.insert({"Griffin", [{4,5},{6,7}]}, :my_rtree)
     iex> DynamicRtree.insert({"Parker", [{14,15},{16,17}]}, :my_rtree)
@@ -188,7 +196,7 @@ defmodule DDRT.DynamicRtree do
     ```
 
     Bulk Insertion:
-    
+
     ```
     iex> DynamicRtree.insert([{"Griffin", [{4,5},{6,7}]}, {"Parker", [{14,15},{16,17}]}], :my_rtree)
 
@@ -209,6 +217,12 @@ defmodule DDRT.DynamicRtree do
 
   def insert(leaf, name) do
     GenServer.call(name, {:insert, leaf}, :infinity)
+  end
+
+  def upsert(_a, name \\ DDRT)
+
+  def upsert(leaf, name) do
+    GenServer.call(name, {:upsert, leaf}, :infinity)
   end
 
   @doc """
@@ -257,14 +271,14 @@ defmodule DDRT.DynamicRtree do
 
   ## Examples
     Individual deletion:
-    
+
     ```
     iex> DynamicRtree.delete("Griffin",:my_rtree)
     iex> DynamicRtree.delete("Parker",:my_rtree)
     ```
 
     Bulk Deletion:
-    
+
     ```
     iex> DynamicRtree.delete(["Griffin","Parker"],:my_rtree)
     ```
@@ -498,12 +512,15 @@ defmodule DDRT.DynamicRtree do
   end
 
   @impl true
-  def handle_call({:insert, leaf}, _from, state) do
+  def handle_call({:upsert, leaf}, _from, state) do
     r =
       {_atom, t} =
       case state.tree do
-        nil -> {:badtree, state.tree}
-        _ -> {:ok, get_rbundle(state) |> tree_insert(leaf)}
+        nil ->
+          {:badtree, state.tree}
+
+        _ ->
+          tree_upsert(get_rbundle(state), leaf)
       end
 
     if is_distributed?(state) do
@@ -513,6 +530,30 @@ defmodule DDRT.DynamicRtree do
 
     {:reply, r, %__MODULE__{state | tree: t}}
   end
+
+  @impl true
+  def handle_call({:insert, leaf}, _from, state) do
+    r =
+      {_atom, t} =
+      case state.tree do
+        nil ->
+          {:badtree, state.tree}
+
+        _ ->
+          case tree_insert(get_rbundle(state), leaf) do
+            {:ok, new_tree} -> {:ok, new_tree}
+            {:error, atom} -> {atom, state.tree}
+          end
+      end
+
+    if is_distributed?(state) do
+      diffs = tree_diffs(state.tree, t)
+      sync_crdt(diffs, state.crdt)
+    end
+
+    {:reply, r, %__MODULE__{state | tree: t}}
+  end
+
 
   @impl true
   def handle_call({:bulk_insert, leaves}, _from, state) do
@@ -526,7 +567,8 @@ defmodule DDRT.DynamicRtree do
           final_rbundle =
             leaves
             |> Enum.reduce(get_rbundle(state), fn l, acc ->
-              %{acc | tree: acc |> tree_insert(l)}
+              {:ok, tree} = tree_insert(acc, l)
+              %{acc | tree: tree}
             end)
 
           {:ok, final_rbundle.tree}

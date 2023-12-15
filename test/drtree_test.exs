@@ -29,7 +29,7 @@ defmodule DynamicRtreeTest do
       new_tuple = {new_node, _new_box} = {UUID.uuid1(), [{1, 2}, {3, 4}]}
       {:ok, t} = DynamicRtree.insert(new_tuple)
       assert t == DynamicRtree.tree()
-      {:ok, t2} = DynamicRtree.insert(new_tuple)
+      {:key_exists, t2} = DynamicRtree.insert(new_tuple)
       assert t2 == t
       {cont, parent, box} = t[new_node]
       assert cont == :leaf
@@ -102,6 +102,48 @@ defmodule DynamicRtreeTest do
       assert t |> Enum.to_list() |> length == t |> Enum.uniq() |> length
       assert length(ch) == 1
       assert root_box == [{9, 9}, {9, 9.1}]
+    end
+
+    test "insert returns error and old tree if key already exists" do
+      DynamicRtree.new(type: MerkleMap)
+
+      same_key = UUID.uuid1()
+
+      first_tuple = {same_key, [{1, 2}, {3, 4}]}
+
+      {:ok, first_tree} = DynamicRtree.insert(first_tuple)
+
+      second_tuple = {same_key, [{3, 4}, {5, 6}]}
+
+      # Assert the insert returns the correct result
+      assert {:key_exists, _} = DynamicRtree.insert(second_tuple)
+
+      {:key_exists, second_tree} = DynamicRtree.insert(second_tuple)
+
+      # Assert the tree was unchanged by the failed insert
+      assert first_tree == second_tree
+    end
+
+    test "upsert inserts or updates new or existing key" do
+      DynamicRtree.new(type: MerkleMap)
+
+      same_key = UUID.uuid1()
+
+      first_tuple = {same_key, [{1, 2}, {3, 4}]}
+
+      {:ok, old_tree} = DynamicRtree.upsert(first_tuple)
+
+      second_tuple = {same_key, [{3, 4}, {5, 6}]}
+
+      # Assert the insert returns the correct result
+      assert {:ok, new_tree} = DynamicRtree.upsert(second_tuple)
+
+      # Assert that the tuple with id key has been updated
+      {:leaf, id, bbox} = MerkleMap.get(new_tree, same_key)
+
+      assert bbox == [{3, 4}, {5, 6}]
+
+      assert old_tree != new_tree
     end
 
     test "Map delete leaf keeps tree consistency" do

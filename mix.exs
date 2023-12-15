@@ -32,7 +32,7 @@ defmodule DynamicRtree.MixProject do
       {:jason, "~> 1.0"},
       {:benchee, "~> 1.0", only: :dev},
       {:earmark, "~> 1.2", only: :dev},
-      {:ex_doc, "~> 0.19", only: :dev},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:dialyxir, "~> 0.4", only: :dev},
       {:merkle_map, "~> 0.2.0"},
       {:delta_crdt, "~> 0.5.0"}
