@@ -5,7 +5,7 @@ defmodule DynamicRtree.MixProject do
     [
       app: :ddrt,
       version: "0.2.1",
-      elixir: "~> 1.9",
+      elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       source_url: "https://github.com/windfish-studio/ddrt",
@@ -28,7 +28,7 @@ defmodule DynamicRtree.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:uuid, "~> 1.1"},
+      {:elixir_uuid, "~> 1.2"},
       {:jason, "~> 1.0"},
       {:benchee, "~> 1.0", only: :dev},
       {:earmark, "~> 1.2", only: :dev},
